@@ -1,0 +1,146 @@
+name: Weekly upstream rebase
+
+on:
+  schedule:
+    - cron: "0 6 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  issues: write
+
+jobs:
+  rebase:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout homelab-main
+        uses: actions/checkout@v4
+        with:
+          ref: homelab-main
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Configure git identity
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Fetch upstream master
+        run: |
+          git remote add upstream https://github.com/paperclipai/paperclip.git
+          git fetch upstream master
+
+      - name: Skip if already current
+        id: check
+        run: |
+          if git merge-base --is-ancestor upstream/master HEAD; then
+            echo "current=true" >> "$GITHUB_OUTPUT"
+            echo "homelab-main already contains upstream/master tip; nothing to do."
+          else
+            echo "current=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Rebase on upstream/master
+        if: steps.check.outputs.current == 'false'
+        id: rebase
+        run: |
+          set +e
+          git rebase upstream/master
+          rc=$?
+          set -e
+          if [ "$rc" -ne 0 ]; then
+            git rebase --abort || true
+            echo "conflicted=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "conflicted=false" >> "$GITHUB_OUTPUT"
+
+      - name: Open issue on rebase conflict
+        if: steps.rebase.outputs.conflicted == 'true'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const today = new Date().toISOString().slice(0, 10);
+            await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: `Weekly rebase conflict against upstream/master (${today})`,
+              body: [
+                "Automatic rebase of `homelab-main` onto `upstream/master` failed with conflicts.",
+                "",
+                "Resolve manually:",
+                "",
+                "```",
+                "git fetch upstream",
+                "git checkout homelab-main",
+                "git rebase upstream/master",
+                "# resolve conflicts",
+                "git push --force-with-lease",
+                "```",
+                "",
+                `Workflow run: ${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`,
+              ].join("\n"),
+            });
+
+      - name: Setup pnpm
+        if: steps.rebase.outputs.conflicted == 'false'
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9.15.4
+
+      - name: Setup Node.js
+        if: steps.rebase.outputs.conflicted == 'false'
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Install dependencies
+        if: steps.rebase.outputs.conflicted == 'false'
+        run: pnpm install --frozen-lockfile
+
+      - name: Typecheck
+        if: steps.rebase.outputs.conflicted == 'false'
+        id: typecheck
+        run: pnpm -r typecheck
+
+      - name: Test
+        if: steps.rebase.outputs.conflicted == 'false'
+        id: test
+        run: pnpm test:run
+
+      - name: Build
+        if: steps.rebase.outputs.conflicted == 'false'
+        id: build
+        run: pnpm build
+
+      - name: Push rebased homelab-main
+        if: steps.rebase.outputs.conflicted == 'false'
+        run: git push --force-with-lease origin homelab-main
+
+      - name: Open issue on verify failure
+        if: failure() && steps.rebase.outputs.conflicted == 'false'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const today = new Date().toISOString().slice(0, 10);
+            await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: `Weekly rebase verify failed (${today})`,
+              body: [
+                "Rebase of `homelab-main` onto `upstream/master` succeeded but verify (typecheck/test/build) failed.",
+                "",
+                "Branch was NOT pushed. Investigate locally:",
+                "",
+                "```",
+                "git fetch upstream",
+                "git checkout homelab-main",
+                "git rebase upstream/master",
+                "pnpm install --frozen-lockfile && pnpm -r typecheck && pnpm test:run && pnpm build",
+                "```",
+                "",
+                `Workflow run: ${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`,
+              ].join("\n"),
+            });
