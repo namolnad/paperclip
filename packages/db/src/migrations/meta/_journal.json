@@ -502,6 +502,13 @@
     {
       "idx": 71,
       "version": "7",
+      "when": 1777098897106,
+      "tag": "0071_instance_secrets",
+      "breakpoints": true
+    },
+    {
+      "idx": 71,
+      "version": "7",
       "when": 1777131234000,
       "tag": "0071_default_hire_approval_off",
       "breakpoints": true
