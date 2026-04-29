@@ -91,6 +91,16 @@ jobs:
               ].join("\n"),
             });
 
+      - name: Renumber homelab migrations after upstream tail
+        if: steps.rebase.outputs.conflicted == 'false'
+        run: |
+          git show upstream/master:packages/db/src/migrations/meta/_journal.json > "$RUNNER_TEMP/upstream-journal.json"
+          node scripts/renumber-homelab-migrations.mjs "$RUNNER_TEMP/upstream-journal.json"
+          if ! git diff --quiet; then
+            git add packages/db/src/migrations
+            git commit -m "chore(db): renumber homelab migrations after upstream tail"
+          fi
+
       - name: Setup pnpm
         if: steps.rebase.outputs.conflicted == 'false'
         uses: pnpm/action-setup@v4
