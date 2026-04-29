@@ -28,8 +28,9 @@ jobs:
 
       - name: Register Drizzle journal merge driver
         run: |
+          cp scripts/merge-drizzle-journal.mjs "$RUNNER_TEMP/merge-drizzle-journal.mjs"
           git config merge.drizzle-journal.name "Drizzle migrations journal merger"
-          git config merge.drizzle-journal.driver "node scripts/merge-drizzle-journal.mjs %O %A %B"
+          git config merge.drizzle-journal.driver "node '$RUNNER_TEMP/merge-drizzle-journal.mjs' %O %A %B"
           mkdir -p .git/info
           echo "packages/db/src/migrations/meta/_journal.json merge=drizzle-journal" >> .git/info/attributes
 
