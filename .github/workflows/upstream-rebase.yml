@@ -26,6 +26,13 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
+      - name: Register Drizzle journal merge driver
+        run: |
+          git config merge.drizzle-journal.name "Drizzle migrations journal merger"
+          git config merge.drizzle-journal.driver "node scripts/merge-drizzle-journal.mjs %O %A %B"
+          mkdir -p .git/info
+          echo "packages/db/src/migrations/meta/_journal.json merge=drizzle-journal" >> .git/info/attributes
+
       - name: Fetch upstream master
         run: |
           git remote add upstream https://github.com/paperclipai/paperclip.git
@@ -144,3 +151,7 @@ jobs:
                 `Workflow run: ${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`,
               ].join("\n"),
             });
+
+      - name: Mark run as failed on rebase conflict
+        if: steps.rebase.outputs.conflicted == 'true'
+        run: exit 1
