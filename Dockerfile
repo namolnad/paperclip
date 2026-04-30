@@ -45,11 +45,45 @@ RUN pnpm --filter @paperclipai/claude-local-tool-bridge build
 RUN pnpm --filter @paperclipai/server build
 RUN test -f server/dist/index.js || (echo "ERROR: server build output missing" && exit 1)
 
+# Workspace packages declare `files: ["dist"]` for npm publish, but their
+# `exports` field still resolves to `./src/*.ts` for in-monorepo consumers
+# (transpiled at runtime via tsx). pnpm deploy honors `files`, so we add
+# `src` to each package's files at build time so the deployed tree has the
+# source the runtime actually loads.
+RUN node -e " \
+  const fs = require('fs'); \
+  const path = require('path'); \
+  const targets = [ \
+    'packages/db/package.json', \
+    'packages/shared/package.json', \
+    'packages/adapter-utils/package.json', \
+    'packages/adapters/claude-local/package.json', \
+    'packages/adapters/claude-local-tool-bridge/package.json', \
+    'packages/adapters/codex-local/package.json', \
+    'packages/adapters/cursor-local/package.json', \
+    'packages/adapters/gemini-local/package.json', \
+    'packages/adapters/openclaw-gateway/package.json', \
+    'packages/adapters/opencode-local/package.json', \
+    'packages/adapters/pi-local/package.json', \
+  ]; \
+  for (const f of targets) { \
+    const p = JSON.parse(fs.readFileSync(f, 'utf8')); \
+    if (Array.isArray(p.files) && !p.files.includes('src')) { \
+      p.files.push('src'); \
+      fs.writeFileSync(f, JSON.stringify(p, null, 2) + '\n'); \
+    } \
+  } \
+"
+
+# Produce a self-contained, prod-only deployment of the server
+RUN pnpm --filter @paperclipai/server deploy --prod /prod \
+  && cp -r ui/dist /prod/ui-dist
+
 FROM base AS production
 ARG USER_UID=1000
 ARG USER_GID=1000
 WORKDIR /app
-COPY --chown=node:node --from=build /app /app
+COPY --chown=node:node --from=build /prod /app
 RUN npm install --global --omit=dev @anthropic-ai/claude-code@latest @openai/codex@latest opencode-ai \
   && apt-get update \
   && apt-get install -y --no-install-recommends openssh-client jq \
@@ -78,4 +112,4 @@ VOLUME ["/paperclip"]
 EXPOSE 3100
 
 ENTRYPOINT ["docker-entrypoint.sh"]
-CMD ["node", "--import", "./server/node_modules/tsx/dist/loader.mjs", "server/dist/index.js"]
+CMD ["node", "--import", "./node_modules/tsx/dist/loader.mjs", "dist/index.js"]
